@@ -15,7 +15,7 @@ A next-generation decentralized escrow system that uses **AI Consensus** to reso
 - **Network:** GenLayer SimNet
 
 ## 🛠️ Installation
-1. Clone the repo: `git clone https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git`
+1. Clone the repo: `git clone https://github.com/Handik4/GenLayer-Escrow`
 2. Install dependencies: `npm install`
 3. Run locally: `npm run dev`
 
