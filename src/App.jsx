@@ -13,7 +13,14 @@ const GitHubIcon = ({ size = 16, className = "" }) => (
 );
 
 // ═══════════════════════════════════════════════════════════════════
-//  CONTRACT CONFIG — Paste your ABI + address here
+//  CONTRACT CONFIG
+//  ⚠️  VERIFY BEFORE DEPLOYING:
+//  1. Replace `address` with your latest deployed contract address on
+//     the GenLayer testnet (check your deployment output or explorer).
+//  2. If you get "Could not decode result data" errors, your ABI is out
+//     of sync with the on-chain bytecode. Re-export the ABI from your
+//     Python contract and paste it into the `abi` array below.
+//  3. All numeric types must match exactly (uint64 vs uint256 matters).
 // ═══════════════════════════════════════════════════════════════════
 const CONTRACT_CONFIG = {
   address: "0xEcbf9DabB48f2244b1AD0637bf6A63dAEd988458",
@@ -168,82 +175,149 @@ function fromWei(wei) {
   return parseFloat(ethers.formatEther(BigInt(String(wei)))).toFixed(4);
 }
 
+// ── Helpers ────────────────────────────────────────────────────────
+
+/** Safely coerce any value coming from an ethers Result to BigInt.
+ *  Handles: BigInt, hex string, decimal string, number. Returns 0n on failure. */
+function safeBigInt(val) {
+  try {
+    if (val === undefined || val === null) return 0n;
+    if (typeof val === "bigint") return val;
+    return BigInt(String(val));
+  } catch { return 0n; }
+}
+
+/** Normalise a raw ethers Result (array-like or named object) into a plain JS
+ *  object with all BigInt fields converted to strings so React state never
+ *  chokes on non-serialisable values. */
+function normaliseDealResult(raw) {
+  // ethers v5 returns an array-like Result; v6 returns an object.
+  // Support both by checking named keys first, then falling back to indices.
+  const pick = (named, idx) => {
+    const v = raw[named] !== undefined ? raw[named] : raw[idx];
+    return v !== undefined ? v : null;
+  };
+
+  return {
+    employer:   String(pick("employer",   0) ?? ""),
+    worker:     String(pick("worker",     1) ?? ""),
+    terms:      String(pick("terms",      2) ?? ""),
+    budget:     safeBigInt(pick("budget",   3)),
+    penalty:    safeBigInt(pick("penalty",  4)),
+    duration:   safeBigInt(pick("duration", 5)),
+    status:     Number(pick("status",     6) ?? 0),
+    created_at: safeBigInt(pick("created_at", 7)),
+  };
+}
+
+/** Normalise a list of deal IDs returned by get_deals_for_* — handles empty
+ *  arrays, undefined, and mixed BigInt / string arrays gracefully. */
+function normaliseIdList(raw) {
+  if (!raw || !raw.length) return [];
+  return [...raw].map(id => safeBigInt(id)).filter(id => id !== 0n);
+}
+
 const ContractService = {
-  /**
-   * create_deal — msg_value MUST equal budget + penalty (in Wei)
-   * budgetWei and penaltyWei are already BigInt (Wei)
-   */
+  // ── WRITE — create_deal ──────────────────────────────────────────
+  // msg_value MUST equal budget + penalty (in Wei). Both are already BigInt.
   async createDeal({ workerAddr, terms, budgetWei, penaltyWei, duration, tg, phone }) {
     const contract = await getContract(true);
-    const msgValue = budgetWei + penaltyWei;
+    const msgValue = safeBigInt(budgetWei) + safeBigInt(penaltyWei);
     const tx = await contract.create_deal(
       workerAddr,
       terms,
-      budgetWei,       // uint64 — the contract receives raw wei value
-      penaltyWei,      // uint64
-      BigInt(duration),
+      safeBigInt(budgetWei),
+      safeBigInt(penaltyWei),
+      safeBigInt(duration),
       tg,
       phone,
       { value: msgValue }
     );
     const receipt = await tx.wait();
-    return { txHash: receipt.hash };
+    return { txHash: receipt.hash ?? receipt.transactionHash };
   },
 
-  /** accept_deal(did: u64, tg: str, phone: str) */
+  // ── WRITE — accept_deal ──────────────────────────────────────────
   async acceptDeal({ did, tg, phone }) {
     const contract = await getContract(true);
-    const tx = await contract.accept_deal(BigInt(did), tg, phone);
+    const tx = await contract.accept_deal(safeBigInt(did), tg, phone);
     const receipt = await tx.wait();
-    return { txHash: receipt.hash };
+    return { txHash: receipt.hash ?? receipt.transactionHash };
   },
 
-  /** approve_manually(did: u64) — releases funds to worker */
+  // ── WRITE — approve_manually ─────────────────────────────────────
   async approveManually({ did }) {
     const contract = await getContract(true);
-    const tx = await contract.approve_manually(BigInt(did));
+    const tx = await contract.approve_manually(safeBigInt(did));
     const receipt = await tx.wait();
-    return { txHash: receipt.hash };
+    return { txHash: receipt.hash ?? receipt.transactionHash };
   },
 
-  /** cancel_with_penalty(did: u64) — splits funds between employer and worker */
+  // ── WRITE — cancel_with_penalty ──────────────────────────────────
   async cancelWithPenalty({ did }) {
     const contract = await getContract(true);
-    const tx = await contract.cancel_with_penalty(BigInt(did));
+    const tx = await contract.cancel_with_penalty(safeBigInt(did));
     const receipt = await tx.wait();
-    return { txHash: receipt.hash };
+    return { txHash: receipt.hash ?? receipt.transactionHash };
   },
 
-  /** request_ai_resolution(did: u64, proof_url: str) */
+  // ── WRITE — request_ai_resolution ───────────────────────────────
   async requestAIResolution({ did, proofUrl }) {
     const contract = await getContract(true);
-    const tx = await contract.request_ai_resolution(BigInt(did), proofUrl);
+    const tx = await contract.request_ai_resolution(safeBigInt(did), proofUrl);
     const receipt = await tx.wait();
-    return { txHash: receipt.hash };
+    return { txHash: receipt.hash ?? receipt.transactionHash };
   },
 
+  // ── READ — get_contract_balance ──────────────────────────────────
   async getContractBalance() {
     try {
       const contract = await getContract(false);
       const raw = await contract.get_contract_balance();
-      return fromWei(raw);
-    } catch { return "—"; }
+      return fromWei(safeBigInt(raw));
+    } catch (e) {
+      console.warn("[ContractService] getContractBalance failed:", e.message);
+      return "—";
+    }
   },
 
+  // ── READ — get_deal ──────────────────────────────────────────────
+  // Returns a normalised plain object, or null on decode failure.
   async getDeal(did) {
-    const contract = await getContract(false);
-    return await contract.get_deal(BigInt(did));
+    try {
+      const contract = await getContract(false);
+      const raw = await contract.get_deal(safeBigInt(did));
+      return normaliseDealResult(raw);
+    } catch (e) {
+      console.warn(`[ContractService] getDeal(${did}) decode error:`, e.message);
+      return null; // caller must filter nulls
+    }
   },
 
+  // ── READ — get_deals_for_worker ──────────────────────────────────
+  // Returns [] on any error so the UI never crashes.
   async getDealsForWorker(address) {
-    const contract = await getContract(false);
-    return await contract.get_deals_for_worker(address);
+    try {
+      const contract = await getContract(false);
+      const raw = await contract.get_deals_for_worker(address);
+      return normaliseIdList(raw);
+    } catch (e) {
+      console.warn("[ContractService] getDealsForWorker decode error:", e.message);
+      return [];
+    }
   },
 
+  // ── READ — get_deals_for_employer ────────────────────────────────
   async getDealsForEmployer(address) {
-    const contract = await getContract(false);
-    return await contract.get_deals_for_employer(address);
-  }
+    try {
+      const contract = await getContract(false);
+      const raw = await contract.get_deals_for_employer(address);
+      return normaliseIdList(raw);
+    } catch (e) {
+      console.warn("[ContractService] getDealsForEmployer decode error:", e.message);
+      return [];
+    }
+  },
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -396,14 +470,17 @@ function DealCard({ deal, walletAddress, onAction }) {
   const [phone, setPhone]         = useState("");
   const [loading, setLoading]     = useState(null);
 
-  const addr = (a) => typeof a === "string" ? a : String(a ?? "");
+  const addr = (a) => (a != null ? String(a) : "");
   const isEmployer = addr(walletAddress).toLowerCase() === addr(deal.employer).toLowerCase();
   const isWorker   = addr(walletAddress).toLowerCase() === addr(deal.worker).toLowerCase();
 
-  const elapsed  = Number(deal.created_at) > 1e12
-    ? (Date.now() - Number(deal.created_at)) / 1000        // ms timestamp
-    : (Date.now() / 1000 - Number(deal.created_at));       // s timestamp
-  const remaining = Math.max(0, Number(deal.duration) - elapsed);
+  // created_at and duration are now strings — parse safely
+  const createdMs  = Number(deal.created_at ?? 0);
+  const durationS  = Number(deal.duration   ?? 0);
+  // created_at may be a Unix seconds timestamp (10 digits) or ms (13 digits)
+  const createdSec = createdMs > 1e12 ? createdMs / 1000 : createdMs;
+  const elapsed    = Date.now() / 1000 - createdSec;
+  const remaining  = Math.max(0, durationS - elapsed);
   const days  = Math.floor(remaining / 86400);
   const hrs   = Math.floor((remaining % 86400) / 3600);
   const mins  = Math.floor((remaining % 3600) / 60);
@@ -535,20 +612,33 @@ export default function App() {
   });
   const sf = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
 
-  // ── Enrich deal with formatted ETH values ──────────────────────
+  // ── Enrich deal with display-ready ETH strings ────────────────
+  // Input `raw` is already a plain JS object from normaliseDealResult()
+  // (or a MOCK_DEALS entry). All BigInt fields are safe to use here because
+  // we immediately convert them to strings for React state.
   const enrichDeal = useCallback((raw, id) => {
-    const budgetEth  = fromWei(raw.budget  ?? raw[3] ?? 0n);
-    const penaltyEth = fromWei(raw.penalty ?? raw[4] ?? 0n);
+    const budgetBig  = safeBigInt(raw.budget  ?? 0);
+    const penaltyBig = safeBigInt(raw.penalty ?? 0);
+
+    // Safe fromWei — fall back to "0.0000" if conversion fails
+    let budgetEth  = "0.0000";
+    let penaltyEth = "0.0000";
+    try { budgetEth  = fromWei(budgetBig);  } catch { /* keep default */ }
+    try { penaltyEth = fromWei(penaltyBig); } catch { /* keep default */ }
+
     return {
-      id: typeof id === "bigint" ? id : BigInt(id),
-      employer:   raw.employer   ?? raw[0],
-      worker:     raw.worker     ?? raw[1],
-      terms:      raw.terms      ?? raw[2],
-      budget:     raw.budget     ?? raw[3],
-      penalty:    raw.penalty    ?? raw[4],
-      duration:   raw.duration   ?? raw[5],
-      status:     Number(raw.status ?? raw[6]),
-      created_at: raw.created_at ?? raw[7],
+      // id stored as string to avoid BigInt serialisation issues in React state
+      id:          String(id ?? raw.id ?? "0"),
+      employer:    String(raw.employer   ?? ""),
+      worker:      String(raw.worker     ?? ""),
+      terms:       String(raw.terms      ?? ""),
+      // Store numeric fields as strings — safe to display, parse when needed
+      budget:      String(budgetBig),
+      penalty:     String(penaltyBig),
+      duration:    String(safeBigInt(raw.duration   ?? 0)),
+      created_at:  String(safeBigInt(raw.created_at ?? 0)),
+      status:      Number(raw.status ?? 0),
+      // Formatted display strings
       _budgetEth:  budgetEth,
       _penaltyEth: penaltyEth,
     };
@@ -592,26 +682,61 @@ export default function App() {
 
   // ── Load deals ─────────────────────────────────────────────────
   const loadDeals = useCallback(async () => {
+    // ── Demo mode: use mock data ──────────────────────────────────
     if (demoMode) {
-      // Enrich mock deals
       const enriched = MOCK_DEALS.map(d => enrichDeal(d, d.id));
       setDeals(enriched);
       return;
     }
     if (!wallet) return;
+
     setRefreshing(true);
     try {
+      // 1. Fetch deal ID lists — each call returns [] on decode failure
       const [wIds, eIds] = await Promise.all([
         ContractService.getDealsForWorker(wallet),
         ContractService.getDealsForEmployer(wallet),
       ]);
-      const allIds = [...new Set([...wIds, ...eIds].map(String))].map(BigInt);
-      const raws   = await Promise.all(allIds.map(id => ContractService.getDeal(id)));
-      const enriched = raws.map((r, i) => enrichDeal(r, allIds[i]));
+
+      // 2. Deduplicate IDs (stored as strings to avoid BigInt Set issues)
+      const uniqueIds = [...new Map(
+        [...wIds, ...eIds].map(id => [String(id), id])
+      ).values()];
+
+      if (uniqueIds.length === 0) {
+        setDeals([]);
+        setRefreshing(false);
+        return;
+      }
+
+      // 3. Fetch each deal individually — getDeal returns null on decode error
+      const raws = await Promise.all(uniqueIds.map(id => ContractService.getDeal(id)));
+
+      // 4. Filter out nulls (decode failures) and enrich the rest
+      let decodeFailures = 0;
+      const enriched = raws
+        .map((r, i) => {
+          if (r === null) { decodeFailures++; return null; }
+          return enrichDeal(r, uniqueIds[i]);
+        })
+        .filter(Boolean);
+
       setDeals(enriched);
       loadBalance();
+
+      // 5. Warn user if some deals failed to decode (ABI mismatch hint)
+      if (decodeFailures > 0) {
+        addToast(
+          "error",
+          `${decodeFailures} deal(s) failed to decode`,
+          "ABI or contract address may be outdated. Check CONTRACT_CONFIG at the top of App.jsx and compare with your deployed contract on the GenLayer testnet."
+        );
+      }
     } catch (e) {
-      addToast("error", "Failed to Load Deals", e.message?.slice(0, 120));
+      // Top-level catch — unexpected errors (network, wallet, etc.)
+      const msg = e.reason ?? e.message ?? "Unknown error";
+      addToast("error", "Failed to Load Deals", msg.slice(0, 180));
+      console.error("[loadDeals] unexpected error:", e);
     }
     setRefreshing(false);
   }, [demoMode, wallet, enrichDeal, loadBalance, addToast]);
