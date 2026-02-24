@@ -1,23 +1,69 @@
-# 🛡️ GenLayer Intelligent Escrow
 
-A next-generation decentralized escrow system that uses **AI Consensus** to resolve disputes. Built during the GenLayer development journey.
+### محتوای پیشنهادی برای فایل README.md:
 
-## ✨ Features
-- **Smart Deposits:** Securely lock funds (Budget + Penalty) in the contract.
-- **AI Arbitration:** No more manual disputes. GenLayer's AI nodes act as an impartial judge to release funds based on proof.
-- **Real-time UI:** Modern Dark-themed dashboard built with React & Tailwind CSS v4.
-- **Transparent Workflows:** Track deals from 'Open' to 'Completed' directly on the blockchain.
+```markdown
+# GenLayer Escrow Service 🛡️
 
-## 🚀 Tech Stack
-- **Smart Contract:** Python (GenLayer Standard)
-- **Frontend:** React.js, Vite
-- **Styling:** Tailwind CSS v4
-- **Network:** GenLayer SimNet
+A decentralized escrow platform built on GenLayer, ensuring secure and transparent transactions between parties.
 
-## 🛠️ Installation
-1. Clone the repo: `git clone https://github.com/Handik4/GenLayer-Escrow`
-2. Install dependencies: `npm install`
-3. Run locally: `npm run dev`
+## 🚀 Live Demo
+You can check out the live version of the project here:  
+**[https://gen-layer-escrow.vercel.app/](https://gen-layer-escrow.vercel.app/)**
 
-## ⚖️ License
-MIT
+---
+
+## ⚠️ Project Status: Early Alpha
+This is the **initial version** (v0.1) of the project.  
+- Please note that this is a work-in-progress.
+- Bugs are expected and will be fixed in upcoming updates.
+- New features and UI improvements are on the way!
+
+## ✨ Key Features
+- **Wallet Connection:** Integration with GenLayer-compatible wallets.
+- **Escrow Creation:** Securely lock funds for deals.
+- **Vesting & Release:** Automated fund release based on contract conditions.
+- **GitHub Integration:** Quick access to the source code.
+- **Disconnect Wallet:** Easy logout and account management.
+
+## 🛠️ Tech Stack
+- **Frontend:** React, Vite
+- **Styling:** Tailwind CSS
+- **Blockchain Interface:** Ethers.js
+- **Network:** GenLayer Testnet
+
+## 🛠️ Installation & Setup
+To run this project locally:
+
+1. Clone the repository:
+   ```bash
+   git clone [https://github.com/Handik4/GenLayer-Escrow.git](https://github.com/Handik4/GenLayer-Escrow.git)
+
+```
+
+2. Install dependencies:
+```bash
+npm install
+
+```
+
+
+3. Start the development server:
+```bash
+npm run dev
+
+```
+
+
+
+## 📈 Roadmap
+
+* [ ] Fixing data decoding issues in the "Deals" section.
+* [ ] Adding more detailed transaction history.
+* [ ] Improving mobile responsiveness.
+* [ ] Integrating more advanced smart contract interactions.
+
+---
+
+*Developed as part of the GenLayer Ecosystem.*
+
+```
