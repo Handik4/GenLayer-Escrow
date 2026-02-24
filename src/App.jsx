@@ -2,8 +2,15 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Shield, Clock, DollarSign, Brain, Wallet, CheckCircle, XCircle,
   AlertCircle, Loader2, Activity, Plus, Eye, RefreshCw, Copy,
-  ExternalLink, Zap, Hash, ChevronDown, Info
+  ExternalLink, Zap, Hash, ChevronDown, Info, LogOut
 } from "lucide-react";
+
+// ── GitHub SVG icon (no external dependency needed) ──────────────
+const GitHubIcon = ({ size = 16, className = "" }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden="true">
+    <path d="M12 0C5.374 0 0 5.373 0 12c0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23A11.509 11.509 0 0 1 12 5.803c1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576C20.566 21.797 24 17.3 24 12c0-6.627-5.373-12-12-12z" />
+  </svg>
+);
 
 // ═══════════════════════════════════════════════════════════════════
 //  CONTRACT CONFIG — Paste your ABI + address here
@@ -531,50 +538,31 @@ export default function App() {
   }, []);
 
   // ── Connect wallet ─────────────────────────────────────────────
-   <div className="flex items-center gap-4">
-  {account ? (
-    <div className="flex items-center gap-3 bg-slate-800/50 backdrop-blur-md border border-slate-700 p-1.5 pl-4 rounded-xl">
-      {/* Displays shortened address: 0x1234...abcd */}
-      <div className="flex flex-col">
-        <span className="text-[10px] text-slate-400 uppercase tracking-wider font-semibold">Connected</span>
-        <span className="text-sm font-mono text-emerald-400">
-          {account.slice(0, 6)}...{account.slice(-4)}
-        </span>
-      </div>
-      
-      {/* Disconnect Button */}
-      <button
-        onClick={() => setAccount(null)}
-        className="bg-red-500/10 hover:bg-red-500/20 text-red-400 p-2 rounded-lg transition-all duration-200 group"
-        title="Disconnect Wallet"
-      >
-        <svg 
-          xmlns="http://www.w3.org/2000/svg" 
-          width="18" 
-          height="18" 
-          viewBox="0 0 24 24" 
-          fill="none" 
-          stroke="currentColor" 
-          strokeWidth="2" 
-          strokeLinecap="round" 
-          strokeLinejoin="round" 
-          className="group-hover:rotate-12 transition-transform"
-        >
-          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-          <polyline points="16 17 21 12 16 7" />
-          <line x1="21" y1="12" x2="9" y2="12" />
-        </svg>
-      </button>
-    </div>
-  ) : (
-    <button
-      onClick={connectWallet}
-      className="bg-blue-600 hover:bg-blue-500 text-white px-8 py-2.5 rounded-xl font-bold transition-all shadow-lg shadow-blue-500/25 active:scale-95"
-    >
-      Connect Wallet
-    </button>
-  )}
-</div>
+  const connectWallet = async () => {
+    if (!window.ethereum) {
+      addToast("error", "No Wallet Detected", "Please install MetaMask or another EVM wallet.");
+      return;
+    }
+    setConnecting(true);
+    try {
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      setWallet(accounts[0]);
+      setDemoMode(false);
+      addToast("success", "Wallet Connected", `${accounts[0].slice(0,6)}…${accounts[0].slice(-4)}`);
+    } catch (e) {
+      addToast("error", "Connection Rejected", e.message);
+    }
+    setConnecting(false);
+  };
+
+  // ── Disconnect wallet ──────────────────────────────────────────
+  const disconnectWallet = () => {
+    setWallet(null);
+    setDemoMode(true);
+    setDeals([]);
+    setBalance("—");
+    addToast("info", "Wallet Disconnected", "You have been disconnected from the app.");
+  };
 
   // ── Load balance ───────────────────────────────────────────────
   const loadBalance = useCallback(async () => {
@@ -721,23 +709,58 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* GitHub link */}
+            <a
+              href="https://github.com/Handik4/GenLayer-Escrow"
+              target="_blank"
+              rel="noopener noreferrer"
+              title="View on GitHub"
+              className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 hover:text-white bg-slate-800/50 hover:bg-slate-700/70 border border-slate-700/50 hover:border-slate-600 transition-all duration-200"
+            >
+              <GitHubIcon size={15} />
+            </a>
+
+            {/* Demo Mode badge */}
             {demoMode && (
               <span className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-full border text-[9px] font-bold tracking-widest uppercase text-amber-400 bg-amber-400/8 border-amber-400/20">
                 <Zap size={9} /> Demo Mode
               </span>
             )}
+
+            {/* Wallet: connected state */}
             {wallet ? (
-              <div className="flex items-center gap-2 bg-emerald-950/50 border border-emerald-500/25 rounded-xl px-3 py-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-emerald-300 text-xs font-mono">{shortAddr}</span>
-                <button onClick={() => { navigator.clipboard.writeText(wallet); addToast("info","Copied","Address copied to clipboard."); }}
-                  className="text-emerald-500/60 hover:text-emerald-300 transition-colors">
-                  <Copy size={11} />
+              <div className="flex items-center gap-1.5">
+                {/* Address pill */}
+                <div className="flex items-center gap-2 bg-emerald-950/50 border border-emerald-500/25 rounded-xl px-3 py-2">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shrink-0" />
+                  <span className="text-emerald-300 text-xs font-mono">{shortAddr}</span>
+                  <button
+                    onClick={() => { navigator.clipboard.writeText(wallet); addToast("info", "Copied", "Address copied to clipboard."); }}
+                    title="Copy address"
+                    className="text-emerald-500/60 hover:text-emerald-300 transition-colors"
+                  >
+                    <Copy size={11} />
+                  </button>
+                </div>
+                {/* Disconnect button */}
+                <button
+                  onClick={disconnectWallet}
+                  title="Disconnect wallet"
+                  className="w-8 h-8 rounded-xl flex items-center justify-center text-slate-500 hover:text-red-400 bg-slate-800/50 hover:bg-red-950/40 border border-slate-700/50 hover:border-red-500/30 transition-all duration-200"
+                >
+                  <LogOut size={14} />
                 </button>
               </div>
             ) : (
-              <Btn variant="primary" icon={Wallet} loading={connecting} onClick={connectWallet}>
-                Connect Wallet
+              /* Wallet: disconnected state */
+              <Btn
+                variant="primary"
+                icon={connecting ? undefined : Wallet}
+                loading={connecting}
+                disabled={connecting}
+                onClick={connectWallet}
+              >
+                {connecting ? "Connecting…" : "Connect Wallet"}
               </Btn>
             )}
           </div>
