@@ -1,7 +1,3 @@
-
-### محتوای پیشنهادی برای فایل README.md:
-
-```markdown
 # GenLayer Escrow Service 🛡️
 
 A decentralized escrow platform built on GenLayer, ensuring secure and transparent transactions between parties.
@@ -65,5 +61,3 @@ npm run dev
 ---
 
 *Developed as part of the GenLayer Ecosystem.*
-
-```
