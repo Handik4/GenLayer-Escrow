@@ -112,43 +112,60 @@ const CONTRACT_CONFIG = {
 // ═══════════════════════════════════════════════════════════════════
 //  CONTRACT SERVICE  (Ethers v6 — BrowserProvider)
 // ═══════════════════════════════════════════════════════════════════
-const ETHERS_CDN = "https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.min.js";
+//  ETHERS COMPATIBILITY LAYER
+//  Supports both Ethers v6 (BrowserProvider) and v5 (providers.Web3Provider).
+//  Uses the static npm package first; no CDN dynamic import needed in Vite.
+// ═══════════════════════════════════════════════════════════════════
+import { ethers } from "ethers";
 
-let _ethers = null;
-async function getEthers() {
-  if (_ethers) return _ethers;
-  // Dynamically import ethers v6 once
-  const mod = await import(ETHERS_CDN);
-  _ethers = mod.ethers ?? mod;
-  return _ethers;
+/**
+ * Detect ethers version and return a unified provider.
+ * v6 → ethers.BrowserProvider(window.ethereum)
+ * v5 → ethers.providers.Web3Provider(window.ethereum)
+ */
+function createProvider() {
+  if (!window.ethereum) {
+    throw new Error("No wallet detected. Please install MetaMask or another EVM wallet.");
+  }
+  try {
+    // Ethers v6 — BrowserProvider exists directly on the ethers namespace
+    if (typeof ethers.BrowserProvider === "function") {
+      return new ethers.BrowserProvider(window.ethereum);
+    }
+    // Ethers v5 fallback — provider lives under ethers.providers
+    if (ethers.providers && typeof ethers.providers.Web3Provider === "function") {
+      return new ethers.providers.Web3Provider(window.ethereum);
+    }
+    throw new Error("Unsupported ethers version. Expected v5 or v6.");
+  } catch (err) {
+    throw new Error(`Failed to initialise provider: ${err.message}`);
+  }
 }
 
-async function getProvider() {
-  if (!window.ethereum) throw new Error("No wallet detected. Please install MetaMask.");
-  const { ethers } = await getEthers();
-  return new ethers.BrowserProvider(window.ethereum);
-}
-
+/** Returns a connected ethers Contract instance.
+ *  withSigner=true  → write calls (transactions)
+ *  withSigner=false → read-only calls (view functions)
+ */
 async function getContract(withSigner = false) {
-  const { ethers } = await getEthers();
-  const provider = await getProvider();
+  const provider = createProvider();
   if (withSigner) {
+    // getSigner() is async in v6, sync-returns a Signer in v5 — await works for both
     const signer = await provider.getSigner();
     return new ethers.Contract(CONTRACT_CONFIG.address, CONTRACT_CONFIG.abi, signer);
   }
   return new ethers.Contract(CONTRACT_CONFIG.address, CONTRACT_CONFIG.abi, provider);
 }
 
-/** Convert ETH string → Wei BigInt */
-async function toWei(ethStr) {
-  const { ethers } = await getEthers();
+/** ETH string → Wei  (works in both v5 and v6) */
+function toWei(ethStr) {
+  // ethers.parseEther exists in both v5 and v6
   return ethers.parseEther(String(ethStr));
 }
 
-/** Convert Wei BigInt → ETH string (4 dp) */
-async function fromWei(wei) {
-  const { ethers } = await getEthers();
-  return parseFloat(ethers.formatEther(BigInt(wei))).toFixed(4);
+/** Wei (BigInt | string | number) → ETH string rounded to 4 dp */
+function fromWei(wei) {
+  // ethers.formatEther exists in both v5 and v6
+  return parseFloat(ethers.formatEther(BigInt(String(wei)))).toFixed(4);
 }
 
 const ContractService = {
@@ -519,9 +536,9 @@ export default function App() {
   const sf = (k) => (e) => setForm(p => ({ ...p, [k]: e.target.value }));
 
   // ── Enrich deal with formatted ETH values ──────────────────────
-  const enrichDeal = useCallback(async (raw, id) => {
-    const budgetEth  = await fromWei(raw.budget  ?? raw[3] ?? 0n);
-    const penaltyEth = await fromWei(raw.penalty ?? raw[4] ?? 0n);
+  const enrichDeal = useCallback((raw, id) => {
+    const budgetEth  = fromWei(raw.budget  ?? raw[3] ?? 0n);
+    const penaltyEth = fromWei(raw.penalty ?? raw[4] ?? 0n);
     return {
       id: typeof id === "bigint" ? id : BigInt(id),
       employer:   raw.employer   ?? raw[0],
@@ -577,7 +594,7 @@ export default function App() {
   const loadDeals = useCallback(async () => {
     if (demoMode) {
       // Enrich mock deals
-      const enriched = await Promise.all(MOCK_DEALS.map(d => enrichDeal(d, d.id)));
+      const enriched = MOCK_DEALS.map(d => enrichDeal(d, d.id));
       setDeals(enriched);
       return;
     }
@@ -590,7 +607,7 @@ export default function App() {
       ]);
       const allIds = [...new Set([...wIds, ...eIds].map(String))].map(BigInt);
       const raws   = await Promise.all(allIds.map(id => ContractService.getDeal(id)));
-      const enriched = await Promise.all(raws.map((r, i) => enrichDeal(r, allIds[i])));
+      const enriched = raws.map((r, i) => enrichDeal(r, allIds[i]));
       setDeals(enriched);
       loadBalance();
     } catch (e) {
@@ -621,8 +638,8 @@ export default function App() {
     }
     setCreating(true);
     try {
-      const budgetWei  = await toWei(budgetEth);
-      const penaltyWei = await toWei(penaltyEth);
+      const budgetWei  = toWei(budgetEth);
+      const penaltyWei = toWei(penaltyEth);
       const { txHash } = await ContractService.createDeal({
         workerAddr, terms, budgetWei, penaltyWei,
         duration: parseInt(duration), tg, phone
