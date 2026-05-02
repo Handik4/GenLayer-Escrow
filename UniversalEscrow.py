@@ -30,13 +30,10 @@ class UniversalEscrow(gl.Contract):
 
     @gl.public.write
     def create_deal(self, worker_addr: str, terms: str, budget: u64, penalty: u64, duration: u64, tg: str, phone: str):
-        """
-        Step 1: Employer creates deal. 
-        Note: Employer must send (budget + penalty) as msg_value to lock funds.
-        """
+        # Check if employer sent enough funds
         required_funds = budget + penalty
         if gl.message.value < required_funds:
-            return f"ERROR: INSUFFICIENT_FUNDS_SENT. REQUIRED: {required_funds}"
+            return f"ERROR: INSUFFICIENT_FUNDS. REQUIRED: {required_funds}"
 
         did = self.total_deals
         self.deals[did] = Agreement(
@@ -53,15 +50,15 @@ class UniversalEscrow(gl.Contract):
             status="OPEN"
         )
         self.total_deals += u64(1)
-        return f"SUCCESS: DEAL_{did}_CREATED_AND_LOCKED"
+        return f"SUCCESS: DEAL_{did}_CREATED"
 
     @gl.public.write
     def accept_deal(self, did: u64, tg: str, phone: str):
         if did not in self.deals: return "ERROR: NOT_FOUND"
         deal = self.deals[did]
         
-        if gl.message.sender_address != deal.worker: return "ERROR: UNAUTHORIZED_WORKER"
-        if deal.status != "OPEN": return "ERROR: DEAL_NOT_AVAILABLE"
+        if gl.message.sender_address != deal.worker: return "ERROR: UNAUTHORIZED"
+        if deal.status != "OPEN": return "ERROR: UNAVAILABLE"
         
         deal.worker_tg = tg
         deal.worker_phone = phone
@@ -71,22 +68,20 @@ class UniversalEscrow(gl.Contract):
 
     @gl.public.write
     def approve_and_pay(self, did: u64):
-        """Employer approves: Worker gets Budget + Penalty back"""
         deal = self.deals[did]
         if gl.message.sender_address != deal.employer: return "ERROR: ONLY_EMPLOYER"
-        if deal.status != "ACTIVE": return "ERROR: DEAL_NOT_ACTIVE"
+        if deal.status != "ACTIVE": return "ERROR: NOT_ACTIVE"
         
         total_payout = deal.budget + deal.penalty
         deal.status = "COMPLETED"
         self.deals[did] = deal
         
-        # Transfer funds to Worker
-        gl.transfer(deal.worker, total_payout)
-        return "SUCCESS: FUNDS_TRANSFERRED_TO_WORKER"
+        # Correct transfer method based on official boilerplate
+        gl.chain.Account(deal.worker).emit_transfer(total_payout)
+        return "SUCCESS: PAID_TO_WORKER"
 
     @gl.public.write
-    def cancel_with_penalty_payout(self, did: u64):
-        """Employer cancels: Worker gets Penalty, Employer gets Budget back"""
+    def cancel_with_penalty(self, did: u64):
         deal = self.deals[did]
         if gl.message.sender_address != deal.employer: return "ERROR: ONLY_EMPLOYER"
         if deal.status != "ACTIVE": return "ERROR: INVALID_STATUS"
@@ -94,10 +89,9 @@ class UniversalEscrow(gl.Contract):
         deal.status = "CANCELLED_BY_EMPLOYER"
         self.deals[did] = deal
         
-        # Split funds
-        gl.transfer(deal.worker, deal.penalty)   # Penalty to Worker
-        gl.transfer(deal.employer, deal.budget) # Refund Budget to Employer
-        return "SUCCESS: PENALTY_PAID_TO_WORKER_REMAINDER_REFUNDED"
+        gl.chain.Account(deal.worker).emit_transfer(deal.penalty)
+        gl.chain.Account(deal.employer).emit_transfer(deal.budget)
+        return "SUCCESS: PENALTY_PROCESSED"
 
     @gl.public.write
     def request_ai_resolution(self, did: u64, proof_url: str):
@@ -105,28 +99,30 @@ class UniversalEscrow(gl.Contract):
         if gl.message.sender_address != deal.worker: return "ERROR: ONLY_WORKER"
         if deal.status != "ACTIVE": return "ERROR: NOT_ACTIVE"
 
-        def ai_arbitration():
-            data = gl.web.get_text(proof_url)
-            prompt = f"Contract: {deal.terms}. Proof: {data[:1000]}. Decision JSON: {{'win': true/false}}"
-            return gl.ai.generate_text(prompt)
+        # Correct Web access and AI consensus logic from the boilerplate
+        web_content = gl.nondet.web.get(proof_url)
+        
+        prompt = f"Contract terms: {deal.terms}. Proof from URL: {web_content[:1000]}. Does the proof satisfy the terms? Reply only with a JSON object: {{\"win\": true}} or {{\"win\": false}}"
+        
+        # Using prompt_non_comparative as seen in official examples
+        ai_response = gl.eq_principle.prompt_non_comparative(
+            gl.nondet.exec_prompt(prompt, num_proposers=3)
+        )
 
-        raw_result = gl.nondet(ai_arbitration)
         try:
-            clean_res = raw_result.strip().replace("```json", "").replace("```", "")
-            res = json.loads(clean_res)
-            
+            res = json.loads(ai_response)
             if res.get("win", False):
                 total_payout = deal.budget + deal.penalty
                 deal.status = "COMPLETED"
                 self.deals[did] = deal
-                gl.transfer(deal.worker, total_payout)
-                return "AI_RESULT: WORKER_WON_AND_PAID"
+                gl.chain.Account(deal.worker).emit_transfer(total_payout)
+                return "AI_RESULT: WORKER_WON"
             else:
-                return "AI_RESULT: WORKER_LOST_WORK_STILL_ACTIVE"
+                return "AI_RESULT: WORKER_LOST"
         except:
-            return "ERROR: AI_CONSENSUS_FAILED"
+            return "ERROR: AI_PARSING_FAILED"
 
     @gl.public.view
     def get_contract_balance(self) -> u64:
-        """Shows total funds currently locked in this smart contract"""
-        return gl.get_balance(gl.address)
+        # Correct way to get balance from the boilerplate
+        return self.balance
