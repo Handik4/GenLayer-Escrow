@@ -21,12 +21,12 @@ class Agreement:
     status: str # OPEN, ACTIVE, COMPLETED, CANCELLED_BY_EMPLOYER
 
 class UniversalEscrow(gl.Contract):
-    deals: TreeMap[u64, Agreement]
-    total_deals: u64
+    deals: TreeMap[u32, Agreement]
+    total_deals: u32
 
     def __init__(self):
         self.deals = TreeMap()
-        self.total_deals = u64(0)
+        self.total_deals = u32(0)
 
     @gl.public.write
     def create_deal(self, worker_addr: str, terms: str, budget: u64, penalty: u64, duration: u64, tg: str, phone: str):
@@ -52,11 +52,11 @@ class UniversalEscrow(gl.Contract):
             worker_phone="",
             status="OPEN"
         )
-        self.total_deals += u64(1)
+        self.total_deals += u32(1)
         return f"SUCCESS: DEAL_{did}_CREATED_AND_LOCKED"
 
     @gl.public.write
-    def accept_deal(self, did: u64, tg: str, phone: str):
+    def accept_deal(self, did: u32, tg: str, phone: str):
         if did not in self.deals: return "ERROR: NOT_FOUND"
         deal = self.deals[did]
         
@@ -70,7 +70,7 @@ class UniversalEscrow(gl.Contract):
         return "SUCCESS: DEAL_ACTIVATED"
 
     @gl.public.write
-    def approve_and_pay(self, did: u64):
+    def approve_manually(self, did: u32):
         """Employer approves: Worker gets Budget + Penalty back"""
         deal = self.deals[did]
         if gl.message.sender_address != deal.employer: return "ERROR: ONLY_EMPLOYER"
@@ -85,7 +85,7 @@ class UniversalEscrow(gl.Contract):
         return "SUCCESS: FUNDS_TRANSFERRED_TO_WORKER"
 
     @gl.public.write
-    def cancel_with_penalty_payout(self, did: u64):
+    def cancel_with_penalty(self, did: u32):
         """Employer cancels: Worker gets Penalty, Employer gets Budget back"""
         deal = self.deals[did]
         if gl.message.sender_address != deal.employer: return "ERROR: ONLY_EMPLOYER"
@@ -100,7 +100,7 @@ class UniversalEscrow(gl.Contract):
         return "SUCCESS: PENALTY_PAID_TO_WORKER_REMAINDER_REFUNDED"
 
     @gl.public.write
-    def request_ai_resolution(self, did: u64, proof_url: str):
+    def request_ai_resolution(self, did: u32, proof_url: str):
         deal = self.deals[did]
         if gl.message.sender_address != deal.worker: return "ERROR: ONLY_WORKER"
         if deal.status != "ACTIVE": return "ERROR: NOT_ACTIVE"
@@ -130,3 +130,36 @@ class UniversalEscrow(gl.Contract):
     def get_contract_balance(self) -> u64:
         """Shows total funds currently locked in this smart contract"""
         return gl.get_balance(gl.address)
+
+    @gl.public.view
+    def get_deal(self, did: u32) -> tuple:
+        if did not in self.deals:
+            return ("", "", "", u64(0), u64(0), u64(0), 0, u64(0))
+        deal = self.deals[did]
+        status_codes = {"OPEN": 0, "ACTIVE": 1, "COMPLETED": 2, "CANCELLED_BY_EMPLOYER": 3}
+        return (
+            deal.employer,
+            deal.worker,
+            deal.terms,
+            deal.budget,
+            deal.penalty,
+            deal.deadline,
+            status_codes.get(deal.status, 0),
+            u64(0),
+        )
+
+    @gl.public.view
+    def get_deals_for_worker(self, worker: str) -> DynArray[u32]:
+        result = []
+        for did in self.deals:
+            if self.deals[did].worker == worker:
+                result.append(did)
+        return result
+
+    @gl.public.view
+    def get_deals_for_employer(self, employer: str) -> DynArray[u32]:
+        result = []
+        for did in self.deals:
+            if self.deals[did].employer == employer:
+                result.append(did)
+        return result
