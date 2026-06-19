@@ -24,8 +24,9 @@ This is the **initial version** (v0.1) of the project.
 ## 🛠️ Tech Stack
 - **Frontend:** React, Vite
 - **Styling:** Tailwind CSS
-- **Blockchain Interface:** Ethers.js
-- **Network:** GenLayer Testnet
+- **Blockchain Interface:** GenLayer SDK (`genlayer-js`)
+- **Smart Contract:** GenLayer Intelligent Contract (GenVM / Python) with AI-arbitrated dispute resolution
+- **Network:** GenLayer Testnet (Asimov)
 
 ## 🛠️ Installation & Setup
 To run this project locally:
@@ -53,7 +54,8 @@ npm run dev
 
 ## 📈 Roadmap
 
-* [ ] Fixing data decoding issues in the "Deals" section.
+* [x] Migrated the frontend to the native GenLayer SDK (`genlayer-js`).
+* [x] Fixed data decoding issues in the "Deals" section.
 * [ ] Adding more detailed transaction history.
 * [ ] Improving mobile responsiveness.
 * [ ] Integrating more advanced smart contract interactions.

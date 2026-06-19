@@ -1,9 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   Shield, Clock, DollarSign, Brain, Wallet, CheckCircle, XCircle,
   AlertCircle, Loader2, Activity, Plus, Eye, RefreshCw, Copy,
   ExternalLink, Zap, Hash, ChevronDown, Info, LogOut
 } from "lucide-react";
+import { createClient } from "genlayer-js";
+import { testnetAsimov } from "genlayer-js/chains";
+import { TransactionStatus } from "genlayer-js/types";
 
 // ── GitHub SVG icon (no external dependency needed) ──────────────
 const GitHubIcon = ({ size = 16, className = "" }) => (
@@ -13,267 +16,185 @@ const GitHubIcon = ({ size = 16, className = "" }) => (
 );
 
 // ═══════════════════════════════════════════════════════════════════
-//  CONTRACT CONFIG
-//  ⚠️  VERIFY BEFORE DEPLOYING:
-//  1. Replace `address` with your latest deployed contract address on
-//     the GenLayer testnet (check your deployment output or explorer).
-//  2. If you get "Could not decode result data" errors, your ABI is out
-//     of sync with the on-chain bytecode. Re-export the ABI from your
-//     Python contract and paste it into the `abi` array below.
-//  3. All numeric types must match exactly (uint64 vs uint256 matters).
+//  GENLAYER CONFIG
+//  This dApp talks to GenLayer through the native `genlayer-js` SDK —
+//  NOT ethers / EVM-ABI. genlayer-js fetches the contract schema from
+//  the chain and encodes/decodes GenLayer calldata automatically, so no
+//  hand-written ABI array is required here.
+//
+//  ⚠️  After (re)deploying contracts/UniversalEscrow.py:
+//      1. Paste the new deployed address into CONTRACT_ADDRESS.
+//      2. Make sure CHAIN matches the network you deployed to
+//         (testnetAsimov is the current GenLayer testnet).
 // ═══════════════════════════════════════════════════════════════════
-const CONTRACT_CONFIG = {
-  address: "0xEcbf9DabB48f2244b1AD0637bf6A63dAEd988458",
-  // GenLayer Python contract ABI aligned to exact function signatures
-  abi: [
-    {
-      name: "create_deal",
-      type: "function",
-      stateMutability: "payable",
-      inputs: [
-        { name: "worker_addr", type: "address" },
-        { name: "terms",       type: "string"  },
-        { name: "budget",      type: "uint64"  },
-        { name: "penalty",     type: "uint64"  },
-        { name: "duration",    type: "uint64"  },
-        { name: "tg",          type: "string"  },
-        { name: "phone",       type: "string"  }
-      ],
-      outputs: []
-    },
-    {
-      name: "accept_deal",
-      type: "function",
-      stateMutability: "nonpayable",
-      inputs: [
-        { name: "did",   type: "uint64" },
-        { name: "tg",    type: "string" },
-        { name: "phone", type: "string" }
-      ],
-      outputs: []
-    },
-    {
-      name: "approve_manually",
-      type: "function",
-      stateMutability: "nonpayable",
-      inputs: [{ name: "did", type: "uint64" }],
-      outputs: []
-    },
-    {
-      name: "cancel_with_penalty",
-      type: "function",
-      stateMutability: "nonpayable",
-      inputs: [{ name: "did", type: "uint64" }],
-      outputs: []
-    },
-    {
-      name: "request_ai_resolution",
-      type: "function",
-      stateMutability: "nonpayable",
-      inputs: [
-        { name: "did",       type: "uint64" },
-        { name: "proof_url", type: "string" }
-      ],
-      outputs: []
-    },
-    {
-      name: "get_contract_balance",
-      type: "function",
-      stateMutability: "view",
-      inputs: [],
-      outputs: [{ name: "", type: "uint256" }]
-    },
-    {
-      name: "get_deal",
-      type: "function",
-      stateMutability: "view",
-      inputs: [{ name: "did", type: "uint64" }],
-      outputs: [
-        { name: "employer",  type: "address" },
-        { name: "worker",    type: "address" },
-        { name: "terms",     type: "string"  },
-        { name: "budget",    type: "uint64"  },
-        { name: "penalty",   type: "uint64"  },
-        { name: "duration",  type: "uint64"  },
-        { name: "status",    type: "uint8"   },
-        { name: "created_at","type": "uint64" }
-      ]
-    },
-    {
-      name: "get_deals_for_worker",
-      type: "function",
-      stateMutability: "view",
-      inputs: [{ name: "worker", type: "address" }],
-      outputs: [{ name: "", type: "uint64[]" }]
-    },
-    {
-      name: "get_deals_for_employer",
-      type: "function",
-      stateMutability: "view",
-      inputs: [{ name: "employer", type: "address" }],
-      outputs: [{ name: "", type: "uint64[]" }]
-    }
-  ]
-};
+const CHAIN = testnetAsimov; // swap for testnetBradbury / studionet if needed
+const CONTRACT_ADDRESS = "0xe165C0A38c0aa4cffcf0058F3cb5F602D6039E31";
 
 // ═══════════════════════════════════════════════════════════════════
-//  CONTRACT SERVICE  (Ethers v6 — BrowserProvider)
+//  CLIENT MANAGEMENT
+//  - Read client: no account, used for @gl.public.view calls.
+//  - Write client: built from the connected wallet (MetaMask) — the
+//    injected provider signs, genlayer-js routes the tx to GenLayer.
 // ═══════════════════════════════════════════════════════════════════
-//  ETHERS COMPATIBILITY LAYER
-//  Supports both Ethers v6 (BrowserProvider) and v5 (providers.Web3Provider).
-//  Uses the static npm package first; no CDN dynamic import needed in Vite.
-// ═══════════════════════════════════════════════════════════════════
-import { ethers } from "ethers";
+let _account = null;        // currently connected wallet address (or null)
+let _readClient = null;
+let _writeClient = null;
 
-/**
- * Detect ethers version and return a unified provider.
- * v6 → ethers.BrowserProvider(window.ethereum)
- * v5 → ethers.providers.Web3Provider(window.ethereum)
- */
-function createProvider() {
+/** Set/clear the active wallet address. Called on connect / disconnect /
+ *  accountsChanged so the write client is always rebuilt for the right signer. */
+function setActiveAccount(addr) {
+  _account = addr || null;
+  _writeClient = null; // force rebuild with the new signer
+}
+
+function getReadClient() {
+  if (!_readClient) _readClient = createClient({ chain: CHAIN });
+  return _readClient;
+}
+
+function getWriteClient() {
   if (!window.ethereum) {
-    throw new Error("No wallet detected. Please install MetaMask or another EVM wallet.");
+    throw new Error("No wallet detected. Please install MetaMask or another GenLayer-compatible wallet.");
   }
-  try {
-    // Ethers v6 — BrowserProvider exists directly on the ethers namespace
-    if (typeof ethers.BrowserProvider === "function") {
-      return new ethers.BrowserProvider(window.ethereum);
-    }
-    // Ethers v5 fallback — provider lives under ethers.providers
-    if (ethers.providers && typeof ethers.providers.Web3Provider === "function") {
-      return new ethers.providers.Web3Provider(window.ethereum);
-    }
-    throw new Error("Unsupported ethers version. Expected v5 or v6.");
-  } catch (err) {
-    throw new Error(`Failed to initialise provider: ${err.message}`);
+  if (!_account) throw new Error("Wallet not connected.");
+  if (!_writeClient) {
+    _writeClient = createClient({ chain: CHAIN, account: _account, provider: window.ethereum });
   }
+  return _writeClient;
 }
 
-/** Returns a connected ethers Contract instance.
- *  withSigner=true  → write calls (transactions)
- *  withSigner=false → read-only calls (view functions)
- */
-async function getContract(withSigner = false) {
-  const provider = createProvider();
-  if (withSigner) {
-    // getSigner() is async in v6, sync-returns a Signer in v5 — await works for both
-    const signer = await provider.getSigner();
-    return new ethers.Contract(CONTRACT_CONFIG.address, CONTRACT_CONFIG.abi, signer);
-  }
-  return new ethers.Contract(CONTRACT_CONFIG.address, CONTRACT_CONFIG.abi, provider);
-}
+// ── Wei <-> ETH helpers (18 decimals, no ethers dependency) ─────────
 
-/** ETH string → Wei  (works in both v5 and v6) */
-function toWei(ethStr) {
-  // ethers.parseEther exists in both v5 and v6
-  return ethers.parseEther(String(ethStr));
-}
-
-/** Wei (BigInt | string | number) → ETH string rounded to 4 dp */
-function fromWei(wei) {
-  // ethers.formatEther exists in both v5 and v6
-  return parseFloat(ethers.formatEther(BigInt(String(wei)))).toFixed(4);
-}
-
-// ── Helpers ────────────────────────────────────────────────────────
-
-/** Safely coerce any value coming from an ethers Result to BigInt.
- *  Handles: BigInt, hex string, decimal string, number. Returns 0n on failure. */
+/** Safely coerce a value to BigInt. Handles BigInt, hex/decimal string,
+ *  number. Returns 0n on failure. */
 function safeBigInt(val) {
   try {
     if (val === undefined || val === null) return 0n;
     if (typeof val === "bigint") return val;
+    if (typeof val === "number") return BigInt(Math.trunc(val));
     return BigInt(String(val));
   } catch { return 0n; }
 }
 
-/** Normalise a raw ethers Result (array-like or named object) into a plain JS
- *  object with all BigInt fields converted to strings so React state never
- *  chokes on non-serialisable values. */
-function normaliseDealResult(raw) {
-  // ethers v5 returns an array-like Result; v6 returns an object.
-  // Support both by checking named keys first, then falling back to indices.
-  const pick = (named, idx) => {
-    const v = raw[named] !== undefined ? raw[named] : raw[idx];
-    return v !== undefined ? v : null;
-  };
+const WEI = 10n ** 18n;
 
+/** ETH decimal string → Wei (BigInt). */
+function toWei(ethStr) {
+  const s = String(ethStr ?? "").trim();
+  if (!s || isNaN(Number(s))) return 0n;
+  const neg = s.startsWith("-");
+  const [whole, frac = ""] = s.replace("-", "").split(".");
+  const fracPadded = (frac + "0".repeat(18)).slice(0, 18);
+  const wei = safeBigInt(whole || "0") * WEI + safeBigInt(fracPadded || "0");
+  return neg ? -wei : wei;
+}
+
+/** Wei (BigInt | string | number) → ETH string rounded to 4 dp. */
+function fromWei(wei) {
+  let v = safeBigInt(wei);
+  const neg = v < 0n;
+  if (neg) v = -v;
+  const whole = v / WEI;
+  const frac = (v % WEI).toString().padStart(18, "0").slice(0, 4);
+  return `${neg ? "-" : ""}${whole.toString()}.${frac}`;
+}
+
+// ── Result normalisers ──────────────────────────────────────────────
+
+/** genlayer-js decodes a contract `dict` return into a Map (or sometimes a
+ *  plain object). Read a field from either shape. */
+function field(raw, key) {
+  if (raw == null) return undefined;
+  if (raw instanceof Map) return raw.get(key);
+  return raw[key];
+}
+
+/** Normalise a get_deal result (Map/object) into a plain JS object.
+ *  BigInt money fields are kept as BigInt; enrichDeal stringifies for state. */
+function normaliseDealResult(raw) {
   return {
-    employer:   String(pick("employer",   0) ?? ""),
-    worker:     String(pick("worker",     1) ?? ""),
-    terms:      String(pick("terms",      2) ?? ""),
-    budget:     safeBigInt(pick("budget",   3)),
-    penalty:    safeBigInt(pick("penalty",  4)),
-    duration:   safeBigInt(pick("duration", 5)),
-    status:     Number(pick("status",     6) ?? 0),
-    created_at: safeBigInt(pick("created_at", 7)),
+    employer:   String(field(raw, "employer") ?? ""),
+    worker:     String(field(raw, "worker") ?? ""),
+    terms:      String(field(raw, "terms") ?? ""),
+    budget:     safeBigInt(field(raw, "budget")),
+    penalty:    safeBigInt(field(raw, "penalty")),
+    duration:   safeBigInt(field(raw, "duration")),
+    status:     Number(field(raw, "status") ?? 0),
+    created_at: safeBigInt(field(raw, "created_at")),
   };
 }
 
-/** Normalise a list of deal IDs returned by get_deals_for_* — handles empty
- *  arrays, undefined, and mixed BigInt / string arrays gracefully. */
+/** Normalise a DynArray[u64] of deal IDs. Deal id 0 is valid, so it is NOT
+ *  filtered out (the old ethers path padded missing slots with 0). */
 function normaliseIdList(raw) {
   if (!raw || !raw.length) return [];
-  return [...raw].map(id => safeBigInt(id)).filter(id => id !== 0n);
+  return [...raw].map(id => safeBigInt(id));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+//  CONTRACT SERVICE  (genlayer-js)
+//  Write calls return after the tx reaches ACCEPTED. The contract's fund
+//  transfers are emitted on 'finalized', so the on-chain payout settles a
+//  little after the UI confirms the state change.
+// ═══════════════════════════════════════════════════════════════════
+async function sendWrite(functionName, args, value = 0n) {
+  const client = getWriteClient();
+  const hash = await client.writeContract({
+    address: CONTRACT_ADDRESS,
+    functionName,
+    args,
+    value,
+  });
+  await client.waitForTransactionReceipt({
+    hash,
+    status: TransactionStatus.ACCEPTED,
+    interval: 5000,
+    retries: 30,
+  });
+  return { txHash: hash };
+}
+
+async function callRead(functionName, args = []) {
+  const client = getReadClient();
+  return client.readContract({ address: CONTRACT_ADDRESS, functionName, args });
 }
 
 const ContractService = {
-  // ── WRITE — create_deal ──────────────────────────────────────────
-  // msg_value MUST equal budget + penalty (in Wei). Both are already BigInt.
+  // ── WRITE — create_deal (payable: msg_value = budget + penalty) ──
   async createDeal({ workerAddr, terms, budgetWei, penaltyWei, duration, tg, phone }) {
-    const contract = await getContract(true);
-    const msgValue = safeBigInt(budgetWei) + safeBigInt(penaltyWei);
-    const tx = await contract.create_deal(
-      workerAddr,
-      terms,
-      safeBigInt(budgetWei),
-      safeBigInt(penaltyWei),
-      safeBigInt(duration),
-      tg,
-      phone,
-      { value: msgValue }
+    const budget = safeBigInt(budgetWei);
+    const penalty = safeBigInt(penaltyWei);
+    return sendWrite(
+      "create_deal",
+      [workerAddr, terms, budget, penalty, safeBigInt(duration), tg, phone],
+      budget + penalty,
     );
-    const receipt = await tx.wait();
-    return { txHash: receipt.hash ?? receipt.transactionHash };
   },
 
   // ── WRITE — accept_deal ──────────────────────────────────────────
   async acceptDeal({ did, tg, phone }) {
-    const contract = await getContract(true);
-    const tx = await contract.accept_deal(safeBigInt(did), tg, phone);
-    const receipt = await tx.wait();
-    return { txHash: receipt.hash ?? receipt.transactionHash };
+    return sendWrite("accept_deal", [safeBigInt(did), tg, phone]);
   },
 
   // ── WRITE — approve_manually ─────────────────────────────────────
   async approveManually({ did }) {
-    const contract = await getContract(true);
-    const tx = await contract.approve_manually(safeBigInt(did));
-    const receipt = await tx.wait();
-    return { txHash: receipt.hash ?? receipt.transactionHash };
+    return sendWrite("approve_manually", [safeBigInt(did)]);
   },
 
   // ── WRITE — cancel_with_penalty ──────────────────────────────────
   async cancelWithPenalty({ did }) {
-    const contract = await getContract(true);
-    const tx = await contract.cancel_with_penalty(safeBigInt(did));
-    const receipt = await tx.wait();
-    return { txHash: receipt.hash ?? receipt.transactionHash };
+    return sendWrite("cancel_with_penalty", [safeBigInt(did)]);
   },
 
   // ── WRITE — request_ai_resolution ───────────────────────────────
   async requestAIResolution({ did, proofUrl }) {
-    const contract = await getContract(true);
-    const tx = await contract.request_ai_resolution(safeBigInt(did), proofUrl);
-    const receipt = await tx.wait();
-    return { txHash: receipt.hash ?? receipt.transactionHash };
+    return sendWrite("request_ai_resolution", [safeBigInt(did), proofUrl]);
   },
 
   // ── READ — get_contract_balance ──────────────────────────────────
   async getContractBalance() {
     try {
-      const contract = await getContract(false);
-      const raw = await contract.get_contract_balance();
+      const raw = await callRead("get_contract_balance");
       return fromWei(safeBigInt(raw));
     } catch (e) {
       console.warn("[ContractService] getContractBalance failed:", e.message);
@@ -281,28 +202,23 @@ const ContractService = {
     }
   },
 
-  // ── READ — get_deal ──────────────────────────────────────────────
-  // Returns a normalised plain object, or null on decode failure.
+  // ── READ — get_deal (reverts DEAL_NOT_FOUND if absent → null) ─────
   async getDeal(did) {
     try {
-      const contract = await getContract(false);
-      const raw = await contract.get_deal(safeBigInt(did));
+      const raw = await callRead("get_deal", [safeBigInt(did)]);
       return normaliseDealResult(raw);
     } catch (e) {
-      console.warn(`[ContractService] getDeal(${did}) decode error:`, e.message);
-      return null; // caller must filter nulls
+      console.warn(`[ContractService] getDeal(${did}) error:`, e.message);
+      return null; // caller filters nulls
     }
   },
 
   // ── READ — get_deals_for_worker ──────────────────────────────────
-  // Returns [] on any error so the UI never crashes.
   async getDealsForWorker(address) {
     try {
-      const contract = await getContract(false);
-      const raw = await contract.get_deals_for_worker(address);
-      return normaliseIdList(raw);
+      return normaliseIdList(await callRead("get_deals_for_worker", [address]));
     } catch (e) {
-      console.warn("[ContractService] getDealsForWorker decode error:", e.message);
+      console.warn("[ContractService] getDealsForWorker error:", e.message);
       return [];
     }
   },
@@ -310,11 +226,9 @@ const ContractService = {
   // ── READ — get_deals_for_employer ────────────────────────────────
   async getDealsForEmployer(address) {
     try {
-      const contract = await getContract(false);
-      const raw = await contract.get_deals_for_employer(address);
-      return normaliseIdList(raw);
+      return normaliseIdList(await callRead("get_deals_for_employer", [address]));
     } catch (e) {
-      console.warn("[ContractService] getDealsForEmployer decode error:", e.message);
+      console.warn("[ContractService] getDealsForEmployer error:", e.message);
       return [];
     }
   },
@@ -653,6 +567,7 @@ export default function App() {
     setConnecting(true);
     try {
       const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      setActiveAccount(accounts[0]);
       setWallet(accounts[0]);
       setDemoMode(false);
       addToast("success", "Wallet Connected", `${accounts[0].slice(0,6)}…${accounts[0].slice(-4)}`);
@@ -664,6 +579,7 @@ export default function App() {
 
   // ── Disconnect wallet ──────────────────────────────────────────
   const disconnectWallet = () => {
+    setActiveAccount(null);
     setWallet(null);
     setDemoMode(true);
     setDeals([]);
@@ -724,12 +640,12 @@ export default function App() {
       setDeals(enriched);
       loadBalance();
 
-      // 5. Warn user if some deals failed to decode (ABI mismatch hint)
+      // 5. Warn user if some deals could not be read from the contract.
       if (decodeFailures > 0) {
         addToast(
           "error",
-          `${decodeFailures} deal(s) failed to decode`,
-          "ABI or contract address may be outdated. Check CONTRACT_CONFIG at the top of App.jsx and compare with your deployed contract on the GenLayer testnet."
+          `${decodeFailures} deal(s) could not be read`,
+          "Check that CONTRACT_ADDRESS and CHAIN at the top of App.jsx match your deployed UniversalEscrow contract on GenLayer."
         );
       }
     } catch (e) {
@@ -747,6 +663,7 @@ export default function App() {
   useEffect(() => {
     if (!window.ethereum) return;
     const handler = (accounts) => {
+      setActiveAccount(accounts[0] ?? null);
       setWallet(accounts[0] ?? null);
       if (!accounts[0]) { setDemoMode(true); setDeals([]); }
     };
@@ -1066,7 +983,7 @@ export default function App() {
             Universal AI Escrow — GenLayer
           </div>
           <code className="text-slate-700 text-[10px] truncate max-w-xs">
-            {CONTRACT_CONFIG.address}
+            {CONTRACT_ADDRESS}
           </code>
         </div>
       </footer>
