@@ -199,10 +199,10 @@ class UniversalEscrow(gl.Contract):
         terms_snapshot = deal.terms
 
         def leader_fn() -> str:
-            res = gl.nondet.web.get(proof_url)
-            if res.status >= 500:
+            res = gl.nondet.web.request(proof_url, method="GET")
+            if res.status_code >= 500:
                 raise gl.vm.UserError(f"{ERROR_TRANSIENT} PROOF_FETCH_5XX {res.status}")
-            if res.status >= 400:
+            if res.status_code >= 400:
                 raise gl.vm.UserError(f"{ERROR_EXTERNAL} PROOF_FETCH_4XX {res.status}")
 
             evidence = res.body.decode("utf-8", errors="replace")[:2000]
