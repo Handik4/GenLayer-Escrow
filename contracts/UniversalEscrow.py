@@ -4,14 +4,14 @@ from genlayer import *
 from dataclasses import dataclass
 import json
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Error classification — lets validators agree (or correctly disagree) on the
+# -----------------------------------------------------------------------------
+# Error classification -- lets validators agree (or correctly disagree) on the
 # failure path during consensus. Prefixes are matched in _handle_leader_error.
-# ─────────────────────────────────────────────────────────────────────────────
-ERROR_EXPECTED = "[EXPECTED]"     # Deterministic business-logic error — must match exactly
-ERROR_EXTERNAL = "[EXTERNAL]"     # External 4xx — deterministic — must match exactly
-ERROR_TRANSIENT = "[TRANSIENT]"   # Network / 5xx — agree if both transient
-ERROR_LLM = "[LLM_ERROR]"         # LLM misbehavior — disagree to force validator rotation
+# -----------------------------------------------------------------------------
+ERROR_EXPECTED = "[EXPECTED]"     # Deterministic business-logic error -- must match exactly
+ERROR_EXTERNAL = "[EXTERNAL]"     # External 4xx -- deterministic -- must match exactly
+ERROR_TRANSIENT = "[TRANSIENT]"   # Network / 5xx -- agree if both transient
+ERROR_LLM = "[LLM_ERROR]"         # LLM misbehavior -- disagree to force validator rotation
 
 # Status codes mirrored by the React frontend (STATUS map in App.jsx).
 STATUS_OPEN = "OPEN"
@@ -43,7 +43,7 @@ def _handle_leader_error(leaders_res: gl.vm.Result, leader_fn) -> bool:
     leader_msg = getattr(leaders_res, "message", "") or ""
     try:
         leader_fn()
-        # Leader errored but validator succeeded → genuine disagreement.
+        # Leader errored but validator succeeded -> genuine disagreement.
         return False
     except gl.vm.UserError as e:
         validator_msg = getattr(e, "message", None) or str(e)
@@ -65,7 +65,7 @@ class Agreement:
     employer: Address
     worker: Address
     terms: str
-    budget: u256          # atto-scale (wei, value * 10**18) — never float
+    budget: u256          # atto-scale (wei, value * 10**18) -- never float
     penalty: u256         # atto-scale (wei)
     duration: u64         # seconds (relative window agreed off-chain)
     created_at: u64       # reserved: GenVM exposes no deterministic wall-clock
@@ -77,7 +77,7 @@ class Agreement:
 
 
 class UniversalEscrow(gl.Contract):
-    # ── Persistent storage: class-level annotations only ──────────────────────
+    # -- Persistent storage: class-level annotations only ----------------------
     deals: TreeMap[str, Agreement]            # deal_id (str) -> Agreement
     employer_index: TreeMap[str, DynArray[u64]]  # employer hex -> [deal_id]
     worker_index: TreeMap[str, DynArray[u64]]    # worker hex   -> [deal_id]
@@ -87,7 +87,7 @@ class UniversalEscrow(gl.Contract):
         # Only primitives are initialized here. TreeMap/DynArray start empty.
         self.total_deals = u64(0)
 
-    # ── Internal helpers (not exposed; no decorator) ──────────────────────────
+    # -- Internal helpers (not exposed; no decorator) --------------------------
     def _pay(self, to: Address, amount: u256) -> None:
         """Queue a native-token transfer. emit_transfer rejects zero, so guard it."""
         if amount > u256(0):
@@ -101,7 +101,7 @@ class UniversalEscrow(gl.Contract):
             raise gl.vm.UserError(f"{ERROR_EXPECTED} DEAL_NOT_FOUND")
         return key, self.deals[key]
 
-    # ── WRITE METHODS ─────────────────────────────────────────────────────────
+    # -- WRITE METHODS ---------------------------------------------------------
     @gl.public.write.payable
     def create_deal(
         self,
@@ -227,7 +227,7 @@ class UniversalEscrow(gl.Contract):
                 return _handle_leader_error(leaders_res, leader_fn)
             mine = json.loads(leader_fn())
             theirs = json.loads(leaders_res.calldata)
-            # Consensus requires an identical verdict — the funds-moving bit.
+            # Consensus requires an identical verdict -- the funds-moving bit.
             return mine["win"] == theirs["win"]
 
         verdict_str = gl.vm.run_nondet_unsafe(leader_fn, validator_fn)
@@ -245,7 +245,7 @@ class UniversalEscrow(gl.Contract):
             return "AI_RESULT: WORKER_WON_AND_PAID"
         return "AI_RESULT: WORKER_LOST_WORK_STILL_ACTIVE"
 
-    # ── VIEW METHODS ──────────────────────────────────────────────────────────
+    # -- VIEW METHODS ----------------------------------------------------------
     @gl.public.view
     def get_contract_balance(self) -> u256:
         return gl.get_contract_at(gl.message.contract_address).balance
@@ -284,7 +284,7 @@ class UniversalEscrow(gl.Contract):
         if hex_key not in index:
             return out
         ids = index[hex_key]
-        # Bounded loop over this address's own deals only — never the whole map.
+        # Bounded loop over this address's own deals only -- never the whole map.
         for i in range(len(ids)):
             out.append(ids[i])
         return out

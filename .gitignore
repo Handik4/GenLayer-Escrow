@@ -17,6 +17,10 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 
+# gltest integration-test artifacts
+.gltest_cache/
+artifacts/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

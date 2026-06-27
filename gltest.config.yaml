@@ -1,0 +1,22 @@
+# gltest configuration for UniversalEscrow integration tests.
+#
+# The default network is `localnet`, a preconfigured network pointing at
+# http://127.0.0.1:4000/api (chain id 61127). Start a local node there before
+# running the suite, e.g. the lightweight GLSim runner:
+#
+#     glsim --port 4000 --validators 5 --no-browser
+#     gltest tests/integration -v -s
+#
+# `localnet` ships with funded test accounts, so no key configuration is needed.
+# To run against hosted Studio instead (gasless, no funding): --network studionet
+paths:
+  contracts: contracts
+
+networks:
+  default: localnet
+  # `localnet` is preconfigured (url http://127.0.0.1:4000/api, chain id 61127,
+  # funded test accounts). Empty mapping inherits those defaults.
+  localnet: {}
+  # `studionet` (studio.genlayer.com) is real GenVM, gasless, no Docker — ships
+  # with funded test accounts. Run with: gltest tests/integration --network studionet
+  studionet: {}
