@@ -136,7 +136,7 @@ Open `src/App.jsx` and confirm the deployment constants near the top:
 
 ```js
 const CHAIN = testnetAsimov;                                      // GenLayer network
-const CONTRACT_ADDRESS = "0xe165C0A38c0aa4cffcf0058F3cb5F602D6039E31";
+const CONTRACT_ADDRESS = "0x4503ac173922F867fA1B255795937e629912eF64";
 ```
 
 > If you redeploy `contracts/UniversalEscrow.py`, update `CONTRACT_ADDRESS` (and `CHAIN` if you switch networks).

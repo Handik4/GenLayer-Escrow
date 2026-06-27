@@ -28,7 +28,7 @@ const GitHubIcon = ({ size = 16, className = "" }) => (
 //         (testnetAsimov is the current GenLayer testnet).
 // ═══════════════════════════════════════════════════════════════════
 const CHAIN = testnetAsimov; // swap for testnetBradbury / studionet if needed
-const CONTRACT_ADDRESS = "0xe165C0A38c0aa4cffcf0058F3cb5F602D6039E31";
+const CONTRACT_ADDRESS = "0x4503ac173922F867fA1B255795937e629912eF64";
 
 // ═══════════════════════════════════════════════════════════════════
 //  CLIENT MANAGEMENT
